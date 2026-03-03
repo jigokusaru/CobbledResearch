@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "id": "cobbledresearch",
+  "version": "${version}",
+  "name": "CobbledResearch",
+  "description": "A creature collector Mod",
+  "authors": ["Jigokusaru"],
+  "contact": {
+    "homepage": ""  },
+  "license": "MIT",
+  "icon": "assets/cobbledresearch/icon.png",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.jigokusaru.cobbledresearch.fabric.CobbledResearchFabric"
+    ],
+    "client": [
+      "com.jigokusaru.cobbledresearch.fabric.client.CobbledResearchFabricClient"
+    ]
+  },
+  "mixins": [
+    "cobbledresearch.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": ">=0.18.4",
+    "minecraft": "~1.21.1",
+    "java": ">=21"
+    ,"architectury": ">=13.0.8"
+    ,"fabric-api": "*"
+  },
+  "suggests": {
+    "another-mod": "*"
+  }
+}
