@@ -13,3 +13,15 @@ dependencies {
     // Core Cobblemon API for your shared code
     modImplementation "com.cobblemon:mod:$rootProject.cobblemon_version"
 }
+loom {
+    runs {
+        client {
+            client()
+            // This forces the dev environment to always use this name
+            programArgs "--username", "Jigokusaru"
+
+            // Optional: if you want a specific UUID to match old saves
+            // programArgs "--uuid", "your-uuid-here"
+        }
+    }
+}
