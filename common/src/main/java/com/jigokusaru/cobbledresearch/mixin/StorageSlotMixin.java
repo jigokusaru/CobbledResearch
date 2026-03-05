@@ -14,11 +14,9 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class StorageSlotMixin {
     @Shadow public abstract Pokemon getPokemon();
 
-    // Changed target from "render" to "renderWidget" based on your provided source
     @Inject(method = "renderWidget", at = @At("HEAD"), cancellable = true)
     private void onRenderWidget(GuiGraphics context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         Pokemon p = getPokemon();
-        // If this specific Pokemon is being dragged by our Multi-Select, stop the render here
         if (p != null && PcAddonHandler.isBeingDragged(p.getUuid())) {
             ci.cancel();
         }
