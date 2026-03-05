@@ -17,6 +17,7 @@ public abstract class StorageSlotMixin {
     @Inject(method = "renderWidget", at = @At("HEAD"), cancellable = true)
     private void onRenderWidget(GuiGraphics context, int mouseX, int mouseY, float delta, CallbackInfo ci) {
         Pokemon p = getPokemon();
+        // This stops the sprite from rendering in the original slot
         if (p != null && PcAddonHandler.isBeingDragged(p.getUuid())) {
             ci.cancel();
         }

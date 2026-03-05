@@ -7,9 +7,12 @@ import com.cobblemon.mod.common.client.gui.pc.StorageSlot;
 import com.cobblemon.mod.common.client.gui.pc.BoxStorageSlot;
 import com.cobblemon.mod.common.client.gui.pc.PartyStorageSlot;
 import com.cobblemon.mod.common.api.storage.pc.PCPosition;
+import com.cobblemon.mod.common.api.storage.party.PartyPosition;
 import com.cobblemon.mod.common.pokemon.Pokemon;
 import com.cobblemon.mod.common.CobblemonSounds;
 import com.cobblemon.mod.common.net.messages.server.storage.pc.MovePCPokemonPacket;
+import com.cobblemon.mod.common.net.messages.server.storage.pc.MovePartyPokemonToPCPacket;
+import com.cobblemon.mod.common.net.messages.server.storage.pc.MovePCPokemonToPartyPacket;
 import com.jigokusaru.cobbledresearch.util.PcAddonHandler;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.Button;
@@ -120,13 +123,14 @@ public abstract class PCGUIMixin extends Screen {
             PCGUI gui = (PCGUI) (Object) this;
             StorageWidgetAccessor accessor = (StorageWidgetAccessor) (Object) gui.getStorage();
 
-            int guiLeft = (this.width - 349) / 2;
-            if (mouseX > guiLeft + 180) return;
-
             if (PcAddonHandler.isDragging()) {
-                for (StorageSlot slot : accessor.getBoxSlots()) {
+                List<StorageSlot> allSlots = new ArrayList<>();
+                allSlots.addAll(accessor.getBoxSlots());
+                allSlots.addAll(accessor.getPartySlots());
+
+                for (StorageSlot slot : allSlots) {
                     if (slot.isHovered((int)mouseX, (int)mouseY) && slot.getPokemon() == null) {
-                        moveSelectionTo(gui, accessor);
+                        moveSelectionTo(gui, accessor, slot);
                         PcAddonHandler.setDragging(false);
                         cir.setReturnValue(true);
                         return;
@@ -136,7 +140,6 @@ public abstract class PCGUIMixin extends Screen {
                 return;
             }
 
-            // Corrected: Loop through ALL slots (Box + Party) for selection
             List<StorageSlot> allSlots = new ArrayList<>();
             allSlots.addAll(accessor.getBoxSlots());
             allSlots.addAll(accessor.getPartySlots());
@@ -145,9 +148,10 @@ public abstract class PCGUIMixin extends Screen {
                 if (slot.isHovered((int)mouseX, (int)mouseY) && slot.getPokemon() != null) {
                     Pokemon p = slot.getPokemon();
                     if (Screen.hasShiftDown()) {
-                        String containerId = slot instanceof PartyStorageSlot ? "party" : "box_" + gui.getStorage().getBox();
-                        PcAddonHandler.toggleSelection(p, containerId);
-                        gui.playSound(CobblemonSounds.PC_CLICK);
+                        String id = slot instanceof PartyStorageSlot ? "party" : "box_" + gui.getStorage().getBox();
+                        if (PcAddonHandler.toggleSelection(p, id, slot)) {
+                            gui.playSound(CobblemonSounds.PC_CLICK);
+                        }
                     } else if (PcAddonHandler.getSelectedPokemon().containsKey(p.getUuid())) {
                         this.isInitialHold = true;
                         this.dragAnchorX = mouseX;
@@ -167,16 +171,58 @@ public abstract class PCGUIMixin extends Screen {
     }
 
     @Unique
-    private void moveSelectionTo(PCGUI gui, StorageWidgetAccessor accessor) {
+    private void moveSelectionTo(PCGUI gui, StorageWidgetAccessor accessor, StorageSlot targetSlot) {
         List<UUID> selection = new ArrayList<>(PcAddonHandler.getSelectedPokemon().keySet());
         int box = gui.getStorage().getBox();
-        int selectionIndex = 0;
-        for (BoxStorageSlot slot : accessor.getBoxSlots()) {
-            if (slot.getPokemon() == null && selectionIndex < selection.size()) {
-                new MovePCPokemonPacket(selection.get(selectionIndex), new PCPosition(box, -1), new PCPosition(box, slot.getPosition().getSlot())).sendToServer();
-                selectionIndex++;
+        boolean sourceIsParty = PcAddonHandler.getCurrentContainerId().equals("party");
+
+        // BRANCH 1: Destination is the BOX
+        if (targetSlot instanceof BoxStorageSlot bSlot) {
+            List<BoxStorageSlot> boxSlots = accessor.getBoxSlots();
+            int searchStart = bSlot.getPosition().getSlot();
+
+            for (UUID pUuid : selection) {
+                int foundSlot = -1;
+                for (int j = searchStart; j < boxSlots.size(); j++) {
+                    if (boxSlots.get(j).getPokemon() == null) {
+                        foundSlot = j;
+                        break;
+                    }
+                }
+                if (foundSlot != -1) {
+                    if (sourceIsParty) {
+                        int srcIdx = PcAddonHandler.getSelectionSourceIndex(pUuid);
+                        new MovePartyPokemonToPCPacket(pUuid, new PartyPosition(srcIdx), new PCPosition(box, foundSlot)).sendToServer();
+                    } else {
+                        new MovePCPokemonPacket(pUuid, new PCPosition(box, -1), new PCPosition(box, foundSlot)).sendToServer();
+                    }
+                    searchStart = foundSlot + 1;
+                } else break;
             }
         }
+        // BRANCH 2: Destination is the PARTY
+        else if (targetSlot instanceof PartyStorageSlot pSlot) {
+            List<PartyStorageSlot> partySlots = accessor.getPartySlots();
+            int searchStart = pSlot.getPosition().getSlot();
+
+            for (UUID pUuid : selection) {
+                int foundSlot = -1;
+                for (int j = searchStart; j < partySlots.size(); j++) {
+                    if (partySlots.get(j).getPokemon() == null) {
+                        foundSlot = j;
+                        break;
+                    }
+                }
+                if (foundSlot != -1) {
+                    // Rule: Only move if selection started in the Box (Box to Party)
+                    if (!sourceIsParty) {
+                        new MovePCPokemonToPartyPacket(pUuid, new PCPosition(box, -1), new PartyPosition(foundSlot)).sendToServer();
+                    }
+                    searchStart = foundSlot + 1;
+                } else break;
+            }
+        }
+
         gui.playSound(CobblemonSounds.PC_DROP);
         PcAddonHandler.clear();
     }
