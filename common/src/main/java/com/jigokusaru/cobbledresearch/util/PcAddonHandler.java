@@ -13,6 +13,7 @@ public class PcAddonHandler {
     private static boolean dragging = false;
     private static final Map<UUID, Pokemon> selectedPokemon = new HashMap<>();
     private static final Map<UUID, Integer> selectionSourceIndices = new HashMap<>();
+    private static final Map<UUID, Integer> selectionSourceBoxes = new HashMap<>();
     private static String currentContainerId = null;
 
     public static boolean isMultiSelectActive() { return multiSelectActive; }
@@ -31,11 +32,15 @@ public class PcAddonHandler {
         return selectionSourceIndices.getOrDefault(uuid, -1);
     }
 
+    public static int getSelectionSourceBox(UUID uuid) {
+        return selectionSourceBoxes.getOrDefault(uuid, -1);
+    }
+
     public static boolean isBeingDragged(UUID uuid) {
         return dragging && selectedPokemon.containsKey(uuid);
     }
 
-    public static boolean toggleSelection(Pokemon pokemon, String containerId, StorageSlot slot) {
+    public static boolean toggleSelection(Pokemon pokemon, String containerId, StorageSlot slot, int boxIndex) {
         if (currentContainerId != null && !selectedPokemon.isEmpty() && !currentContainerId.equals(containerId)) {
             return false;
         }
@@ -46,12 +51,17 @@ public class PcAddonHandler {
         if (selectedPokemon.containsKey(uuid)) {
             selectedPokemon.remove(uuid);
             selectionSourceIndices.remove(uuid);
+            selectionSourceBoxes.remove(uuid);
             if (selectedPokemon.isEmpty()) currentContainerId = null;
         } else {
             selectedPokemon.put(uuid, pokemon);
             int index = -1;
-            if (slot instanceof PartyStorageSlot pSlot) index = pSlot.getPosition().getSlot();
-            else if (slot instanceof BoxStorageSlot bSlot) index = bSlot.getPosition().getSlot();
+            if (slot instanceof PartyStorageSlot pSlot) {
+                index = pSlot.getPosition().getSlot();
+            } else if (slot instanceof BoxStorageSlot bSlot) {
+                index = bSlot.getPosition().getSlot();
+                selectionSourceBoxes.put(uuid, boxIndex);
+            }
             selectionSourceIndices.put(uuid, index);
         }
         return true;
@@ -60,6 +70,7 @@ public class PcAddonHandler {
     public static void clear() {
         selectedPokemon.clear();
         selectionSourceIndices.clear();
+        selectionSourceBoxes.clear();
         currentContainerId = null;
         dragging = false;
     }

@@ -46,9 +46,13 @@ public abstract class PCGUIMixin extends Screen {
 
     @Inject(method = "init", at = @At("TAIL"))
     private void onInit(CallbackInfo ci) {
-        PcAddonHandler.clear();
+        if (!PcAddonHandler.isDragging()) {
+            PcAddonHandler.clear();
+        }
+
         int x = (this.width - 349) / 2;
         int y = (this.height - 205) / 2;
+
         this.multiSelectBtn = new IconButton(x + 228, y + 31, 20, 20, MULTI_SELECT_ICON, null, "ui.multi_select.tooltip", "multi_select", (button) -> {
             PcAddonHandler.toggleMultiSelect();
             if (button instanceof IconButton iconBtn) iconBtn.setHighlighted(PcAddonHandler.isMultiSelectActive());
@@ -65,6 +69,10 @@ public abstract class PCGUIMixin extends Screen {
 
             if (PcAddonHandler.isMultiSelectActive() && this.multiSelectBtn.visible) {
                 StorageWidgetAccessor accessor = (StorageWidgetAccessor) (Object) gui.getStorage();
+
+                if (PcAddonHandler.isDragging()) {
+                    accessor.setGrabbedSlot(null);
+                }
 
                 if (isInitialHold && !PcAddonHandler.isDragging() && !Screen.hasShiftDown()) {
                     if (Math.abs(mouseX - dragAnchorX) > 2 || Math.abs(mouseY - dragAnchorY) > 2) {
@@ -100,15 +108,18 @@ public abstract class PCGUIMixin extends Screen {
     private void renderFormation(GuiGraphics context, PCGUI gui, StorageWidgetAccessor accessor, int mouseX, int mouseY, float delta) {
         double deltaX = mouseX - dragAnchorX;
         double deltaY = mouseY - dragAnchorY;
+
         List<StorageSlot> allSlots = new ArrayList<>();
         allSlots.addAll(accessor.getBoxSlots());
         allSlots.addAll(accessor.getPartySlots());
+
         for (StorageSlot slot : allSlots) {
             Pokemon p = slot.getPokemon();
-            if (p != null && PcAddonHandler.getSelectedPokemon().containsKey(p.getUuid())) {
+            if (p != null && PcAddonHandler.isBeingDragged(p.getUuid())) {
                 int rx = (int) (slot.getX() + deltaX);
                 int ry = (int) (slot.getY() + deltaY);
                 slot.renderSlot(context, rx, ry, delta);
+
                 context.pose().pushPose();
                 context.pose().translate(0, 0, 800);
                 context.blit(SELECTION_ARROW, rx + 8, ry - 12, 0, 0, 8, 8, 8, 16);
@@ -129,14 +140,18 @@ public abstract class PCGUIMixin extends Screen {
                 allSlots.addAll(accessor.getPartySlots());
 
                 for (StorageSlot slot : allSlots) {
-                    if (slot.isHovered((int)mouseX, (int)mouseY) && slot.getPokemon() == null) {
-                        moveSelectionTo(gui, accessor, slot);
-                        PcAddonHandler.setDragging(false);
-                        cir.setReturnValue(true);
+                    if (slot.isHovered((int)mouseX, (int)mouseY)) {
+                        Pokemon p = slot.getPokemon();
+                        if (p == null || PcAddonHandler.isBeingDragged(p.getUuid())) {
+                            moveSelectionTo(gui, accessor, slot);
+                            PcAddonHandler.setDragging(false);
+                            cir.setReturnValue(true);
+                        } else {
+                            cir.setReturnValue(true);
+                        }
                         return;
                     }
                 }
-                PcAddonHandler.setDragging(false);
                 return;
             }
 
@@ -149,7 +164,7 @@ public abstract class PCGUIMixin extends Screen {
                     Pokemon p = slot.getPokemon();
                     if (Screen.hasShiftDown()) {
                         String id = slot instanceof PartyStorageSlot ? "party" : "box_" + gui.getStorage().getBox();
-                        if (PcAddonHandler.toggleSelection(p, id, slot)) {
+                        if (PcAddonHandler.toggleSelection(p, id, slot, gui.getStorage().getBox())) {
                             gui.playSound(CobblemonSounds.PC_CLICK);
                         }
                     } else if (PcAddonHandler.getSelectedPokemon().containsKey(p.getUuid())) {
@@ -173,10 +188,9 @@ public abstract class PCGUIMixin extends Screen {
     @Unique
     private void moveSelectionTo(PCGUI gui, StorageWidgetAccessor accessor, StorageSlot targetSlot) {
         List<UUID> selection = new ArrayList<>(PcAddonHandler.getSelectedPokemon().keySet());
-        int box = gui.getStorage().getBox();
+        int currentBox = gui.getStorage().getBox();
         boolean sourceIsParty = PcAddonHandler.getCurrentContainerId().equals("party");
 
-        // BRANCH 1: Destination is the BOX
         if (targetSlot instanceof BoxStorageSlot bSlot) {
             List<BoxStorageSlot> boxSlots = accessor.getBoxSlots();
             int searchStart = bSlot.getPosition().getSlot();
@@ -184,42 +198,45 @@ public abstract class PCGUIMixin extends Screen {
             for (UUID pUuid : selection) {
                 int foundSlot = -1;
                 for (int j = searchStart; j < boxSlots.size(); j++) {
-                    if (boxSlots.get(j).getPokemon() == null) {
+                    Pokemon existing = boxSlots.get(j).getPokemon();
+                    if (existing == null || selection.contains(existing.getUuid())) {
                         foundSlot = j;
                         break;
                     }
                 }
                 if (foundSlot != -1) {
+                    int srcIdx = PcAddonHandler.getSelectionSourceIndex(pUuid);
+                    int srcBox = PcAddonHandler.getSelectionSourceBox(pUuid);
+
                     if (sourceIsParty) {
-                        int srcIdx = PcAddonHandler.getSelectionSourceIndex(pUuid);
-                        new MovePartyPokemonToPCPacket(pUuid, new PartyPosition(srcIdx), new PCPosition(box, foundSlot)).sendToServer();
-                    } else {
-                        new MovePCPokemonPacket(pUuid, new PCPosition(box, -1), new PCPosition(box, foundSlot)).sendToServer();
+                        new MovePartyPokemonToPCPacket(pUuid, new PartyPosition(srcIdx), new PCPosition(currentBox, foundSlot)).sendToServer();
+                    } else if (srcBox != currentBox || srcIdx != foundSlot) {
+                        new MovePCPokemonPacket(pUuid, new PCPosition(srcBox, srcIdx), new PCPosition(currentBox, foundSlot)).sendToServer();
                     }
                     searchStart = foundSlot + 1;
                 } else break;
             }
         }
-        // BRANCH 2: Destination is the PARTY
         else if (targetSlot instanceof PartyStorageSlot pSlot) {
             List<PartyStorageSlot> partySlots = accessor.getPartySlots();
             int searchStart = pSlot.getPosition().getSlot();
-
-            for (UUID pUuid : selection) {
-                int foundSlot = -1;
-                for (int j = searchStart; j < partySlots.size(); j++) {
-                    if (partySlots.get(j).getPokemon() == null) {
-                        foundSlot = j;
-                        break;
+            if (!sourceIsParty) {
+                for (UUID pUuid : selection) {
+                    int foundSlot = -1;
+                    for (int j = searchStart; j < partySlots.size(); j++) {
+                        Pokemon existing = partySlots.get(j).getPokemon();
+                        if (existing == null || selection.contains(existing.getUuid())) {
+                            foundSlot = j;
+                            break;
+                        }
+                    }
+                    if (foundSlot != -1 && foundSlot <= 5) {
+                        int srcIdx = PcAddonHandler.getSelectionSourceIndex(pUuid);
+                        int srcBox = PcAddonHandler.getSelectionSourceBox(pUuid);
+                        new MovePCPokemonToPartyPacket(pUuid, new PCPosition(srcBox, srcIdx), new PartyPosition(foundSlot)).sendToServer();
+                        searchStart = foundSlot + 1;
                     }
                 }
-                if (foundSlot != -1) {
-                    // Rule: Only move if selection started in the Box (Box to Party)
-                    if (!sourceIsParty) {
-                        new MovePCPokemonToPartyPacket(pUuid, new PCPosition(box, -1), new PartyPosition(foundSlot)).sendToServer();
-                    }
-                    searchStart = foundSlot + 1;
-                } else break;
             }
         }
 
